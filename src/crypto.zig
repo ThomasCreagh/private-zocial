@@ -138,7 +138,7 @@ pub fn deriveAesKey(
 // === Signatures ===
 
 /// Generate long term keypair for key exchange and signing
-pub fn generateSigningKeypair() Ed25519.KeyPair {
+pub fn generateSigningKeyPair() Ed25519.KeyPair {
     return Ed25519.KeyPair.generate();
 }
 

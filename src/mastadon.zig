@@ -78,6 +78,50 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     return access_token;
 }
 
+pub fn getUser(
+    allocator: Allocator,
+    username: Username,
+) !Parsed(models.User) {
+    const url_format = try std.fmt.allocPrint(
+        allocator,
+        "https://mastodon.social/api/v1/accounts/lookup?acct={s}",
+        .{std.mem.trimRight(u8, &username, &[_]u8{0})},
+    );
+    defer allocator.free(url_format);
+
+    var client = Client{ .allocator = allocator };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(url_format);
+
+    var request = try client.request(.GET, uri, .{
+        .headers = .{
+            .accept_encoding = .{ .override = "identity" },
+        },
+    });
+    defer request.deinit();
+
+    try request.sendBodiless();
+
+    var redirect_buf: [1024]u8 = undefined;
+    var response = try request.receiveHead(&redirect_buf);
+
+    std.debug.print("getUser Status: {}\n", .{response.head.status});
+
+    var transfer_buf: [4096]u8 = undefined;
+    const response_reader = response.reader(&transfer_buf);
+
+    const raw_body = try response_reader.allocRemaining(allocator, .limited(4096));
+    defer allocator.free(raw_body);
+
+    return try std.json.parseFromSlice(
+        models.User,
+        allocator,
+        raw_body,
+        .{ .ignore_unknown_fields = true },
+    );
+}
+
 /// Get messages by the id. If id not given then all broadcast messages are given
 pub fn getMessages(
     allocator: Allocator,
@@ -173,4 +217,37 @@ pub fn sendMessage(
     const response = try request.receiveHead(&redirect_buf);
 
     std.debug.print("sendMessage Status: {}\n", .{response.head.status});
+}
+
+pub fn setBio(
+    allocator: Allocator,
+    access_token: []const u8,
+    message: []const u8,
+) !void {
+    var client = Client{ .allocator = allocator };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse("https://mastodon.social/api/v1/accounts/update_credentials");
+
+    const auth_format = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
+    defer allocator.free(auth_format);
+
+    var request = try client.request(.PATCH, uri, .{
+        .headers = .{
+            .accept_encoding = .{ .override = "identity" },
+            .authorization = .{ .override = auth_format },
+            .content_type = .{ .override = "application/x-www-form-urlencoded" },
+        },
+    });
+    defer request.deinit();
+
+    const body = try std.fmt.allocPrint(allocator, "note={s}", .{message});
+    defer allocator.free(body);
+
+    try request.sendBodyComplete(body);
+
+    var redirect_buf: [1024]u8 = undefined;
+    const response = try request.receiveHead(&redirect_buf);
+
+    std.debug.print("setBio Status: {}\n", .{response.head.status});
 }
