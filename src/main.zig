@@ -1,5 +1,6 @@
 const std = @import("std");
 const mastadon = @import("mastadon.zig");
+const crypto = @import("crypto.zig");
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -12,10 +13,17 @@ pub fn main() !void {
     const access_token = try mastadon.authenticateUser(allocator);
     defer allocator.free(access_token);
 
+    try mastadon.sendMessage(allocator, access_token, "client test", null);
+
+    const parsed_messages = try mastadon.getMessages(allocator, access_token, null);
+    defer parsed_messages.deinit();
+
     var stdout_buf: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout = &stdout_writer.interface;
 
-    try stdout.print("access_token: {s}", .{access_token});
+    for (0..parsed_messages.value.len) |i| {
+        try stdout.print("message: {s}\n", .{parsed_messages.value[i].getContent()});
+    }
     try stdout.flush();
 }

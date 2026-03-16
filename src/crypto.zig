@@ -2,18 +2,58 @@
 
 const std = @import("std");
 const crypto = std.crypto;
+const Allocator = std.mem.Allocator;
 pub const Aes128Ocb = crypto.aead.aes_ocb.Aes128Ocb;
 pub const X25519 = crypto.dh.X25519;
 pub const HkdfSha256 = crypto.kdf.hkdf.HkdfSha256;
 pub const Ed25519 = crypto.sign.Ed25519;
 
-pub const base64 = std.base64.standard;
-/// uuid_length in bytes
-pub const uuid_length = 16;
-pub const UUID = [uuid_length]u8;
-pub const AesKey = [crypto.Aes128Ocb.key_length]u8;
+pub const base64 = std.base64.url_safe;
+
+pub const UUID = struct {
+    pub const UUID_LENGTH: usize = 16;
+    pub const STR_LENGTH: usize = base64.Encoder.calcSize(UUID_LENGTH);
+    /// Raw key bytes
+    key: [UUID_LENGTH]u8 = undefined,
+    /// Base64 reprsentation of the key
+    str: [STR_LENGTH]u8 = undefined,
+
+    pub fn init() @This() {
+        var uuid: UUID = undefined;
+        crypto.random.bytes(&uuid.key);
+
+        var buf: [STR_LENGTH]u8 = undefined;
+        const encoded = base64.Encoder.encode(&buf, &uuid.key);
+        @memcpy(&uuid.str, encoded);
+
+        return uuid;
+    }
+    /// Create UUID from raw key bytes
+    pub fn fromKey(key: [UUID_LENGTH]u8) @This() {
+        var uuid: UUID = undefined;
+        uuid.key = key;
+
+        var buf: [STR_LENGTH]u8 = undefined;
+        const encoded = base64.Encoder.encode(&buf, &uuid.key);
+        @memcpy(&uuid.str, encoded);
+
+        return uuid;
+    }
+    /// Create UUID from key base64 string
+    pub fn fromStr(str: [STR_LENGTH]u8) !@This() {
+        var uuid: UUID = undefined;
+        uuid.str = str;
+
+        var buf: [UUID_LENGTH]u8 = undefined;
+        const decoded = try base64.Decoder.decode(&buf, &uuid.str);
+        @memcpy(&uuid.key, decoded);
+
+        return uuid;
+    }
+};
 
 // === AES Encryption ===
+pub const AesKey = [crypto.Aes128Ocb.key_length]u8;
 
 /// Generate random AES key
 pub fn generateRandomAesKey(buf: *AesKey) void {

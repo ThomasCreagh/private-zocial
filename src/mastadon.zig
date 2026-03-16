@@ -1,24 +1,22 @@
 const std = @import("std");
 const config = @import("config.zig");
+const models = @import("models.zig");
+const crypto = @import("crypto.zig");
+const parseFromSlice = std.json.parseFromSlice;
+const Parsed = std.json.Parsed;
 const Client = std.http.Client;
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 pub const username_legth = 30;
 pub const Username = [username_legth]u8;
-
-const UserToken = struct {
-    access_token: []u8,
-    token_type: []u8,
-    scope: []u8,
-    created_at: usize,
-};
 
 pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     var stdout_buf: [4096]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout = &stdout_writer.interface;
 
-    var stdin_buf: [1024]u8 = undefined;
+    var stdin_buf: [4096]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
     const stdin: *std.io.Reader = &stdin_reader.interface;
 
@@ -42,7 +40,6 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
 
     const uri = try std.Uri.parse("https://mastodon.social/oauth/token");
 
-    // Make the connection to the server.
     var request = try client.request(.POST, uri, .{
         .headers = .{
             .accept_encoding = .{ .override = "identity" },
@@ -54,7 +51,11 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     const redirect_uri = "urn:ietf:wg:oauth:2.0:oob";
     const body_options = "grant_type=authorization_code&client_id={s}&client_secret={s}&redirect_uri={s}&code={s}";
 
-    const body = try std.fmt.allocPrint(allocator, body_options, .{ config.CLIENT_ID, config.CLIENT_SECRET, redirect_uri, auth_code });
+    const body = try std.fmt.allocPrint(
+        allocator,
+        body_options,
+        .{ config.CLIENT_ID, config.CLIENT_SECRET, redirect_uri, auth_code },
+    );
     defer allocator.free(body);
 
     try request.sendBodyComplete(body);
@@ -65,12 +66,111 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     var transfer_buf: [4096]u8 = undefined;
     const response_reader = response.reader(&transfer_buf);
 
-    const raw_body = try response_reader.allocRemaining(allocator, .limited(1024));
+    std.debug.print("AuthenticateUser Status: {}\n", .{response.head.status});
+
+    const raw_body = try response_reader.allocRemaining(allocator, .limited(4096));
     defer allocator.free(raw_body);
 
-    const parsed = try std.json.parseFromSlice(UserToken, allocator, raw_body, .{});
+    const parsed = try std.json.parseFromSlice(models.UserToken, allocator, raw_body, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
 
     const access_token = allocator.dupe(u8, parsed.value.access_token);
     return access_token;
+}
+
+/// Get messages by the id. If id not given then all broadcast messages are given
+pub fn getMessages(
+    allocator: Allocator,
+    access_token: []const u8,
+    id: ?crypto.UUID,
+) !Parsed([]models.Message) {
+    var auth_url: []u8 = undefined;
+    if (id) |uuid| {
+        auth_url = try std.fmt.allocPrint(
+            allocator,
+            "https://mastodon.social/api/v1/timelines/tag/private_zocial_{s}",
+            .{uuid.str},
+        );
+    } else {
+        auth_url = try allocator.dupe(u8, "https://mastodon.social/api/v1/timelines/tag/private_zocial_0");
+    }
+    defer allocator.free(auth_url);
+
+    var client = Client{ .allocator = allocator };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(auth_url);
+
+    const auth_format = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
+    defer allocator.free(auth_format);
+
+    var request = try client.request(.GET, uri, .{
+        .headers = .{
+            .authorization = .{ .override = auth_format },
+            .accept_encoding = .{ .override = "identity" },
+        },
+    });
+    defer request.deinit();
+
+    try request.sendBodiless();
+
+    var redirect_buf: [1024]u8 = undefined;
+    var response = try request.receiveHead(&redirect_buf);
+
+    std.debug.print("getMessages Status: {}\n", .{response.head.status});
+
+    var transfer_buf: [4096]u8 = undefined;
+    const response_reader = response.reader(&transfer_buf);
+
+    const raw_body = try response_reader.allocRemaining(allocator, .limited(4096 * 16));
+    defer allocator.free(raw_body);
+
+    return try std.json.parseFromSlice(
+        []models.Message,
+        allocator,
+        raw_body,
+        .{ .ignore_unknown_fields = true },
+    );
+}
+
+pub fn sendMessage(
+    allocator: Allocator,
+    access_token: []const u8,
+    message: []const u8,
+    id: ?crypto.UUID,
+) !void {
+    var tag: []u8 = undefined;
+    if (id) |uuid| {
+        tag = try std.fmt.allocPrint(allocator, "#private_zocial_{s}", .{uuid.str});
+    } else {
+        tag = try allocator.dupe(u8, "#private_zocial_0");
+    }
+    defer allocator.free(tag);
+
+    var client = Client{ .allocator = allocator };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse("https://mastodon.social/api/v1/statuses");
+
+    const auth_format = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
+    defer allocator.free(auth_format);
+
+    var request = try client.request(.POST, uri, .{
+        .headers = .{
+            .accept_encoding = .{ .override = "identity" },
+            .authorization = .{ .override = auth_format },
+            .content_type = .{ .override = "application/x-www-form-urlencoded" },
+        },
+    });
+    defer request.deinit();
+
+    const body = try std.fmt.allocPrint(allocator, "status={s}\n\n{s}", .{ message, tag });
+    defer allocator.free(body);
+
+    try request.sendBodyComplete(body);
+
+    var redirect_buf: [1024]u8 = undefined;
+    const response = try request.receiveHead(&redirect_buf);
+
+    std.debug.print("sendMessage Status: {}\n", .{response.head.status});
 }
