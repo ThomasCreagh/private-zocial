@@ -2,3 +2,5 @@
 .cache/
 zig-out/
 *.o
+.env
+src/config.zig

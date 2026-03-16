@@ -11,12 +11,12 @@ pub const base64 = std.base64.standard;
 /// uuid_length in bytes
 pub const uuid_length = 16;
 pub const UUID = [uuid_length]u8;
-pub const AES_KEY = [crypto.Aes128Ocb.key_length]u8;
+pub const AesKey = [crypto.Aes128Ocb.key_length]u8;
 
 // === AES Encryption ===
 
 /// Generate random AES key
-pub fn generateRandomAesKey(buf: *AES_KEY) void {
+pub fn generateRandomAesKey(buf: *AesKey) void {
     crypto.random.bytes(buf);
 }
 
@@ -28,7 +28,7 @@ pub fn aesEncrypt(
     /// Message
     m: []const u8,
     nonce: *[Aes128Ocb.nonce_length]u8,
-    key: AES_KEY,
+    key: AesKey,
 ) void {
     crypto.random.bytes(&nonce);
     Aes128Ocb.encrypt(c, tag, m, &[_]u8{}, nonce, key);
@@ -42,7 +42,7 @@ pub fn aesDecrypt(
     c: []const u8,
     tag: *[Aes128Ocb.tag_length]u8,
     nonce: [Aes128Ocb.nonce_length]u8,
-    key: AES_KEY,
+    key: AesKey,
 ) !void {
     try Aes128Ocb.decrypt(m, c, tag, &[_]u8{}, nonce, key);
 }
