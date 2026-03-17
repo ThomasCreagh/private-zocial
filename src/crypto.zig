@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const crypto = std.crypto;
+pub const random = std.crypto.random;
 const Allocator = std.mem.Allocator;
 pub const Aes128Ocb = crypto.aead.aes_ocb.Aes128Ocb;
 pub const X25519 = crypto.dh.X25519;
@@ -20,7 +21,7 @@ pub const UUID = struct {
 
     pub fn init() @This() {
         var uuid: UUID = undefined;
-        crypto.random.bytes(&uuid.key);
+        random.bytes(&uuid.key);
 
         var buf: [STR_LENGTH]u8 = undefined;
         const encoded = base64.Encoder.encode(&buf, &uuid.key);
@@ -53,11 +54,11 @@ pub const UUID = struct {
 };
 
 // === AES Encryption ===
-pub const AesKey = [crypto.Aes128Ocb.key_length]u8;
+pub const AesKey = [Aes128Ocb.key_length]u8;
 
 /// Generate random AES key
 pub fn generateRandomAesKey(buf: *AesKey) void {
-    crypto.random.bytes(buf);
+    random.bytes(buf);
 }
 
 /// Encrypting messages with symmetric keys
@@ -70,8 +71,8 @@ pub fn aesEncrypt(
     nonce: *[Aes128Ocb.nonce_length]u8,
     key: AesKey,
 ) void {
-    crypto.random.bytes(&nonce);
-    Aes128Ocb.encrypt(c, tag, m, &[_]u8{}, nonce, key);
+    random.bytes(nonce);
+    Aes128Ocb.encrypt(c, tag, m, &[_]u8{}, nonce.*, key);
 }
 
 /// Decrypting messages with symmetric keys
@@ -91,7 +92,7 @@ pub fn aesDecrypt(
 
 /// Generate new ephemeral keypair
 pub fn getEphemeralKeyPair() X25519.KeyPair {
-    X25519.KeyPair.generate();
+    return X25519.KeyPair.generate();
 }
 
 /// Translates Ed25519 public key to be used in X25519 key exchange
@@ -105,8 +106,8 @@ pub fn deriveX25519KeyPair(key_pair: Ed25519.KeyPair) !X25519.KeyPair {
 }
 
 /// Key derivation funciton which uses Sha256 to generate a 32 bytes key
-pub fn keyDerivationFunction(
-    out: []u8,
+fn keyDerivationFunction(
+    out: *AesKey,
     ikm: [X25519.shared_length]u8,
     nonce: [Aes128Ocb.nonce_length]u8,
     ctx: []const u8,
@@ -116,7 +117,7 @@ pub fn keyDerivationFunction(
 }
 
 /// Derives the X25519 secret with given keys
-pub fn deriveKeyExchangeSecret(
+fn deriveKeyExchangeSecret(
     secret_key: [X25519.secret_length]u8,
     public_key: [X25519.public_length]u8,
 ) error{IdentityElement}![X25519.shared_length]u8 {
@@ -125,7 +126,7 @@ pub fn deriveKeyExchangeSecret(
 
 /// Gernerates the AES key with given keys
 pub fn deriveAesKey(
-    out: []u8,
+    out: *AesKey,
     secret_key: [X25519.secret_length]u8,
     public_key: [X25519.public_length]u8,
     nonce: [Aes128Ocb.nonce_length]u8,
@@ -144,7 +145,7 @@ pub fn generateSigningKeyPair() Ed25519.KeyPair {
 
 pub fn signMessage(key_pair: Ed25519.KeyPair, msg: []const u8) !Ed25519.Signature {
     var noise: [Ed25519.noise_length]u8 = undefined;
-    crypto.random.bytes(&noise);
+    random.bytes(&noise);
     return try key_pair.sign(msg, noise);
 }
 
