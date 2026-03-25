@@ -10,10 +10,7 @@ const json = std.json;
 const Allocator = std.mem.Allocator;
 const HashMap = std.AutoArrayHashMap;
 const ArrayList = std.ArrayList;
-
-const clientErrors = error{
-    IdNotInMap,
-};
+const BaseMethods = models.BaseMethods;
 
 pub const Member = struct {
     username: social.Username,
@@ -112,55 +109,36 @@ pub const Client = struct {
         const messages = parsed_messages.value;
         for (0..messages.len) |i| {
             const encoded_message = messages[i].getContent();
-            const decode_len = try base32.Decoder.calcSize(encoded_message);
 
-            const json_buf = try self.allocator.alloc(u8, decode_len);
-            defer self.allocator.free(json_buf);
+            var dm_invite = try BaseMethods(models.DmInvite).fromBase32(self.allocator, encoded_message);
+            defer dm_invite.base.deinit(self.allocator);
 
-            try base32.Decoder.decode(json_buf, encoded_message);
-
-            const parsed_json = try json.parseFromSlice(models.DmInvite.Encrypted, self.allocator, json_buf, .{});
-            defer parsed_json.deinit();
-
-            const encrypted_dm_invite: models.DmInvite.Encrypted = parsed_json.value;
+            const enc: *models.DmInvite.Encrypted = &dm_invite.base.encrypted.?;
 
             var aes_key: crypto.AesKey = undefined;
+
             crypto.deriveAesKey(
                 &aes_key,
                 self.lt_ke_keys.secret_key,
-                encrypted_dm_invite.ephemeral_key,
-                encrypted_dm_invite.nonce,
-                &encrypted_dm_invite.id.key,
+                enc.ephemeral_key,
+                enc.nonce,
+                &enc.id.key,
             ) catch |err| {
-                std.debug.print("acceptInvite: couldnt get key {}", .{err});
+                std.debug.print("acceptInvite: couldnt get key {}\n", .{err});
                 break;
             };
 
-            const secret_json_raw = try self.allocator.alloc(u8, encrypted_dm_invite.encrypted.len);
-            defer self.allocator.free(secret_json_raw);
-
-            crypto.aesDecrypt(
-                secret_json_raw,
-                encrypted_dm_invite.encrypted,
-                encrypted_dm_invite.tag,
-                encrypted_dm_invite.nonce,
-                aes_key,
-            ) catch |err| {
-                std.debug.print("acceptInvite: couldnt decrypt {}", .{err});
+            dm_invite.base.decrypt(self.allocator, aes_key) catch {
+                std.debug.print("acceptInvite: couldnt decrypt message\n", .{});
                 break;
             };
 
-            const parsed_secret_json = try json.parseFromSlice(models.DmInvite.Secret, self.allocator, secret_json_raw, .{});
-            defer parsed_secret_json.deinit();
-
-            const secret_dm_invite: models.DmInvite.Secret = parsed_secret_json.value;
-            std.debug.print("acceptInvite: decoded json secret: {any}\n", .{secret_dm_invite});
-            if (secret_dm_invite.label != .dm_invite) {
-                std.debug.print("acceptInvite: wrong label", .{});
+            if (dm_invite.base.secret.?.label != .dm_invite) {
+                std.debug.print("acceptInvite: wrong label\n", .{});
                 break;
             }
 
-            try self.dms.put(encrypted_dm_invite.id, Dm{
+            try self.dms.put(enc.id, Dm{
                 .name = try self.allocator.dupe(u8, messages[i].account.username),
                 .key = aes_key,
             });
@@ -170,61 +148,41 @@ pub const Client = struct {
         const uuid = id orelse crypto.UUID.init();
 
         const ephemeral_keys = crypto.getEphemeralKeyPair();
-        const sender_public_key = ephemeral_keys.public_key;
-        const sender_secret_key = ephemeral_keys.secret_key;
 
         const parsed_user = try social.getUser(self.allocator, username);
         defer parsed_user.deinit();
 
         var user = parsed_user.value;
-        const reciever_public_ed25519_key = user.getPublicKey();
         var decoded_buf: [crypto.Ed25519.PublicKey.encoded_length]u8 = undefined;
-        try base32.Decoder.decode(&decoded_buf, reciever_public_ed25519_key);
-        const decoded_key = try crypto.Ed25519.PublicKey.fromBytes(decoded_buf);
+        const decoded_key = try user.getPublicKey(&decoded_buf);
         const reciever_public_key = try crypto.getRecieversPublicKeyFromEd25519(decoded_key);
 
-        var nonce: [crypto.Aes128Ocb.nonce_length]u8 = undefined;
-        crypto.random.bytes(&nonce);
+        var dm_invite: models.DmInvite = try BaseMethods(models.DmInvite).fromEncryptedAndSecret(
+            self.allocator,
+            models.DmInvite.Encrypted{
+                .ephemeral_key = ephemeral_keys.public_key,
+                .id = uuid,
+            },
+            models.DmInvite.Secret{},
+        );
+        defer dm_invite.base.deinit(self.allocator);
+
         var aes_key: crypto.AesKey = undefined;
-        try crypto.deriveAesKey(&aes_key, sender_secret_key, reciever_public_key, nonce, &uuid.key);
+        try crypto.deriveAesKey(&aes_key, ephemeral_keys.secret_key, reciever_public_key, dm_invite.base.encrypted.?.nonce, &uuid.key);
 
         try self.dms.put(uuid, Dm{
             .name = try self.allocator.dupe(u8, username),
             .key = aes_key,
         });
 
-        const json_secret = models.DmInvite.Secret{};
+        try dm_invite.base.encrypt(self.allocator, aes_key);
 
-        var serial_secret = std.io.Writer.Allocating.init(self.allocator);
-        defer serial_secret.deinit();
-
-        try serial_secret.writer.print("{f}", .{std.json.fmt(json_secret, .{})});
-        const secret_str = serial_secret.written();
-
-        const encrypted_secret = try self.allocator.alloc(u8, secret_str.len);
-        defer self.allocator.free(encrypted_secret);
-        var tag: [crypto.Aes128Ocb.tag_length]u8 = undefined;
-        crypto.aesEncrypt(encrypted_secret, &tag, secret_str, &nonce, aes_key);
-
-        const json_model = models.DmInvite.Encrypted{
-            .ephemeral_key = sender_public_key,
-            .nonce = nonce,
-            .tag = tag,
-            .id = uuid,
-            .encrypted = encrypted_secret,
-        };
-
-        var serialized: std.io.Writer.Allocating = .init(self.allocator);
-        defer serialized.deinit();
-
-        try serialized.writer.print("{f}", .{std.json.fmt(json_model, .{})});
-        const serialized_str = serialized.written();
-
-        const encode_buf = try self.allocator.alloc(u8, base32.Encoder.calcSize(serialized_str.len));
+        const encode_buf = try self.allocator.alloc(u8, base32.Encoder.calcSize(dm_invite.base.json_encrypted.?.written().len));
         defer self.allocator.free(encode_buf);
-        const decoded_str = base32.Encoder.encode(encode_buf, serialized_str);
 
-        try social.sendMessage(self.allocator, self.access_token, decoded_str, null);
+        const encoded_str = try dm_invite.base.toBase32(encode_buf);
+
+        try social.sendMessage(self.allocator, self.access_token, encoded_str, null);
     }
     pub fn getIdFromUsername(self: *@This(), username: []const u8) !crypto.UUID {
         var it = self.dms.iterator();
@@ -242,42 +200,62 @@ pub const Client = struct {
         if (self.dms.get(id)) |x| {
             aes_key = x.key;
         } else {
-            return clientErrors.IdNotInMap;
+            return error.IdNotInMap;
         }
 
-        var nonce: [crypto.Aes128Ocb.nonce_length]u8 = undefined;
-        crypto.random.bytes(&nonce);
+        var dm_message: models.DmMessage = try BaseMethods(models.DmMessage).fromEncryptedAndSecret(
+            self.allocator,
+            models.DmMessage.Encrypted{},
+            models.DmMessage.Secret{
+                .message = message,
+            },
+        );
+        defer dm_message.base.deinit(self.allocator);
 
-        const json_secret = models.DmMessage.Secret{ .message = message };
+        try dm_message.base.encrypt(self.allocator, aes_key);
 
-        var serial_secret = std.io.Writer.Allocating.init(self.allocator);
-        defer serial_secret.deinit();
-
-        try serial_secret.writer.print("{f}", .{std.json.fmt(json_secret, .{})});
-        const secret_str = serial_secret.written();
-
-        const encrypted_secret = try self.allocator.alloc(u8, secret_str.len);
-        defer self.allocator.free(encrypted_secret);
-        var tag: [crypto.Aes128Ocb.tag_length]u8 = undefined;
-        crypto.aesEncrypt(encrypted_secret, &tag, secret_str, &nonce, aes_key);
-
-        const json_model = models.DmMessage.Encrypted{
-            .nonce = nonce,
-            .tag = tag,
-            .encrypted = encrypted_secret,
-        };
-
-        var serialized: std.io.Writer.Allocating = .init(self.allocator);
-        defer serialized.deinit();
-
-        try serialized.writer.print("{f}", .{std.json.fmt(json_model, .{})});
-        const serialized_str = serialized.written();
-
-        const encode_buf = try self.allocator.alloc(u8, base32.Encoder.calcSize(serialized_str.len));
+        const encode_buf = try self.allocator.alloc(u8, base32.Encoder.calcSize(dm_message.base.json_encrypted.?.written().len));
         defer self.allocator.free(encode_buf);
-        const decoded_str = base32.Encoder.encode(encode_buf, serialized_str);
 
-        try social.sendMessage(self.allocator, self.access_token, decoded_str, id);
+        const encoded_str = try dm_message.base.toBase32(encode_buf);
+
+        try social.sendMessage(self.allocator, self.access_token, encoded_str, id);
+    }
+    pub fn recieveMessage(self: *@This(), id: crypto.UUID) !void {
+        var aes_key: crypto.AesKey = undefined;
+        if (self.dms.get(id)) |x| {
+            aes_key = x.key;
+        } else {
+            return error.IdNotInMap;
+        }
+
+        const parsed_messages = try social.getMessages(self.allocator, self.access_token, id);
+        defer parsed_messages.deinit();
+        const messages: []models.Message = parsed_messages.value;
+
+        std.debug.print("ID: {s}\n", .{id.str});
+        for (0..messages.len) |i| {
+            const encoded_message = messages[i].getContent();
+
+            var dm_message = try BaseMethods(models.DmMessage).fromBase32(self.allocator, encoded_message);
+            defer dm_message.base.deinit(self.allocator);
+
+            dm_message.base.decrypt(self.allocator, aes_key) catch {
+                std.debug.print("recieveMessage: couldnt decrypt message\n", .{});
+                break;
+            };
+
+            if (dm_message.base.secret.?.label != .dm_message) {
+                std.debug.print("acceptInvite: wrong label\n", .{});
+                break;
+            }
+
+            std.debug.print("recieveMessage: Message {} from {s}:\n\t{s}\n", .{
+                i,
+                messages[i].account.username,
+                dm_message.base.secret.?.message,
+            });
+        }
     }
     pub fn saveToFile(self: *@This()) !void {
         var client_save = ClientSave{
@@ -301,14 +279,14 @@ pub const Client = struct {
         defer self.allocator.free(path);
 
         const file = std.fs.cwd().createFile(path, .{}) catch |err| {
-            std.debug.print("file error: {}\n", .{err});
+            std.debug.print("saveToFile: file error: {}\n", .{err});
             return err;
         };
         defer file.close();
 
         try file.writeAll(string.written());
 
-        std.debug.print("file written with: {s}\n", .{string.written()});
+        std.debug.print("saveToFile: file written with: {s}\n", .{string.written()});
     }
     pub fn fromFile(allocator: Allocator, name: []const u8) !@This() {
         const path = try std.fmt.allocPrint(allocator, "data/{s}.json", .{name});

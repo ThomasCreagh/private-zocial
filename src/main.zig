@@ -26,7 +26,8 @@ pub fn main() !void {
     var client_b = try Client.fromFile(allocator, "bob");
     defer client_b.deinit();
 
-    try client_b.sendMessage(try client_b.getIdFromUsername("alice"), "hi alice");
+    //try client_b.sendMessage(try client_b.getIdFromUsername("alice"), "");
+    try client_a.recieveMessage(try client_a.getIdFromUsername("bob"));
 
     try client_b.saveToFile();
     try client_a.saveToFile();
