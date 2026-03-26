@@ -112,6 +112,7 @@ pub const Client = struct {
                         .key = sec.key,
                         .name = try self.allocator.dupe(u8, sec.name),
                     });
+
                     break;
                 }
             }
@@ -245,7 +246,70 @@ pub const Client = struct {
         }
         return error.GroupNotFound;
     }
-    pub fn sendMessage(self: *@This(), id: crypto.UUID, message: []const u8) !void {
+    pub fn sendGroupMessage(self: *@This(), id: crypto.UUID, message: []const u8) !void {
+        var aes_key: crypto.AesKey = undefined;
+        if (self.groups.get(id)) |x| {
+            aes_key = x.key;
+        } else {
+            return error.IdNotFound;
+        }
+
+        var group_message: models.GroupMessage = try BaseMethods(models.GroupMessage).fromEncryptedAndSecret(
+            self.allocator,
+            models.GroupMessage.Encrypted{},
+            models.GroupMessage.Secret{
+                .message = message,
+            },
+        );
+        defer group_message.base.deinit(self.allocator);
+
+        try group_message.base.encrypt(self.allocator, aes_key);
+
+        const encode_buf = try self.allocator.alloc(u8, base32.Encoder.calcSize(group_message.base.json_encrypted.?.written().len));
+        defer self.allocator.free(encode_buf);
+
+        const encoded_str = try group_message.base.toBase32(encode_buf);
+
+        try social.sendMessage(self.allocator, self.access_token, encoded_str, id);
+    }
+    pub fn recieveGroupMessage(self: *@This(), id: crypto.UUID) !void {
+        var aes_key: crypto.AesKey = undefined;
+        if (self.groups.get(id)) |x| {
+            aes_key = x.key;
+        } else {
+            return error.IdNotInMap;
+        }
+
+        const parsed_messages = try social.getMessages(self.allocator, self.access_token, id);
+        defer parsed_messages.deinit();
+        const messages: []models.Message = parsed_messages.value;
+
+        dprint("ID: {s}\n", .{id.str});
+        for (0..messages.len) |i| {
+            const encoded_message = messages[i].getContent();
+
+            var group_message = try BaseMethods(models.GroupMessage).fromBase32(self.allocator, encoded_message);
+            defer group_message.base.deinit(self.allocator);
+
+            group_message.base.decrypt(self.allocator, aes_key) catch {
+                dprint("recieveGroupMessage: couldnt decrypt message\n", .{});
+                break;
+            };
+
+            if (group_message.base.secret.?.label != .group_message) {
+                dprint("recieveGroupMessage: wrong label\n", .{});
+                break;
+            }
+
+            dprint("recieveGroupMessage: Message {} from user: {s} in group: {s}:\n\t{s}\n", .{
+                i,
+                messages[i].account.username,
+                self.groups.get(id).?.name,
+                group_message.base.secret.?.message,
+            });
+        }
+    }
+    pub fn sendDmMessage(self: *@This(), id: crypto.UUID, message: []const u8) !void {
         var aes_key: crypto.AesKey = undefined;
         if (self.dms.get(id)) |x| {
             aes_key = x.key;
@@ -271,7 +335,7 @@ pub const Client = struct {
 
         try social.sendMessage(self.allocator, self.access_token, encoded_str, id);
     }
-    pub fn recieveMessage(self: *@This(), id: crypto.UUID) !void {
+    pub fn recieveDmMessage(self: *@This(), id: crypto.UUID) !void {
         var aes_key: crypto.AesKey = undefined;
         if (self.dms.get(id)) |x| {
             aes_key = x.key;
@@ -291,20 +355,32 @@ pub const Client = struct {
             defer dm_message.base.deinit(self.allocator);
 
             dm_message.base.decrypt(self.allocator, aes_key) catch {
-                dprint("recieveMessage: couldnt decrypt message\n", .{});
+                dprint("recieveDmMessage: couldnt decrypt message\n", .{});
                 break;
             };
 
             if (dm_message.base.secret.?.label != .dm_message) {
-                dprint("recieveMessage: wrong label\n", .{});
+                dprint("recieveDmMessage: wrong label\n", .{});
                 break;
             }
 
-            dprint("recieveMessage: Message {} from {s}:\n\t{s}\n", .{
+            dprint("recieveDmMessage: Message {} from {s}:\n\t{s}\n", .{
                 i,
                 messages[i].account.username,
                 dm_message.base.secret.?.message,
             });
+        }
+    }
+    pub fn recieveAllMessages(self: *@This()) !void {
+        try self.acceptDmInvites();
+        try self.acceptGroupInvites();
+        var dm_it = self.dms.iterator();
+        while (dm_it.next()) |dm| {
+            try self.recieveDmMessage(dm.key_ptr.*);
+        }
+        var group_it = self.groups.iterator();
+        while (group_it.next()) |group| {
+            try self.recieveGroupMessage(group.key_ptr.*);
         }
     }
     pub fn saveToFile(self: *@This()) !void {
