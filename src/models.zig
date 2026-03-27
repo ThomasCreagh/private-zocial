@@ -177,7 +177,7 @@ pub fn BaseMethods(comptime T: type) type {
                 enc.nonce,
                 aes_key,
             ) catch |err| {
-                std.debug.print("BaseMethods: couldnt decrypt {}\n", .{err});
+                std.log.debug("BaseMethods: couldnt decrypt {}\n", .{err});
                 return error.CouldNotDecryptAES;
             };
 

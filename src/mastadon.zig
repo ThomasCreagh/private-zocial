@@ -2,6 +2,8 @@ const std = @import("std");
 const config = @import("config.zig");
 const models = @import("models.zig");
 const crypto = @import("crypto.zig");
+
+const log = std.log;
 const parseFromSlice = std.json.parseFromSlice;
 const Parsed = std.json.Parsed;
 const Client = std.http.Client;
@@ -65,7 +67,7 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     var transfer_buf: [4096]u8 = undefined;
     const response_reader = response.reader(&transfer_buf);
 
-    std.debug.print("AuthenticateUser Status: {}\n", .{response.head.status});
+    log.debug("AuthenticateUser Status: {}\n", .{response.head.status});
 
     const raw_body = try response_reader.allocRemaining(allocator, .limited(4096));
     defer allocator.free(raw_body);
@@ -105,7 +107,7 @@ pub fn getUser(
     var redirect_buf: [1024]u8 = undefined;
     var response = try request.receiveHead(&redirect_buf);
 
-    std.debug.print("getUser Status: {}\n", .{response.head.status});
+    log.debug("getUser Status: {}\n", .{response.head.status});
 
     var transfer_buf: [4096]u8 = undefined;
     const response_reader = response.reader(&transfer_buf);
@@ -160,7 +162,7 @@ pub fn getMessages(
     var redirect_buf: [1024]u8 = undefined;
     var response = try request.receiveHead(&redirect_buf);
 
-    std.debug.print("getMessages Status: {}\n", .{response.head.status});
+    log.debug("getMessages Status: {}\n", .{response.head.status});
 
     var transfer_buf: [4096]u8 = undefined;
     const response_reader = response.reader(&transfer_buf);
@@ -182,7 +184,7 @@ pub fn sendMessage(
     message: []const u8,
     id: ?crypto.UUID,
 ) !void {
-    std.debug.print("MESSAGE: {s}\n", .{message});
+    //log.debug("MESSAGE: {s}\n", .{message});
     var tag: []u8 = undefined;
     if (id) |uuid| {
         tag = try std.fmt.allocPrint(allocator, "#private_zocial_{s}", .{uuid.str});
@@ -216,7 +218,7 @@ pub fn sendMessage(
     var redirect_buf: [1024]u8 = undefined;
     const response = try request.receiveHead(&redirect_buf);
 
-    std.debug.print("sendMessage Status: {}\n", .{response.head.status});
+    log.debug("sendMessage Status: {}\n", .{response.head.status});
 }
 
 pub fn setBio(
@@ -249,5 +251,5 @@ pub fn setBio(
     var redirect_buf: [1024]u8 = undefined;
     const response = try request.receiveHead(&redirect_buf);
 
-    std.debug.print("setBio Status: {}\n", .{response.head.status});
+    log.debug("setBio Status: {}\n", .{response.head.status});
 }

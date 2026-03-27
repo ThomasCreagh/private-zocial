@@ -6,8 +6,8 @@ const crypto = @import("crypto.zig");
 const social = @import("mastadon.zig");
 const base32 = @import("base32.zig").standard;
 
+const log = std.log;
 const json = std.json;
-const dprint = std.debug.print;
 const Allocator = std.mem.Allocator;
 const HashMap = std.AutoArrayHashMap;
 const ArrayList = std.ArrayList;
@@ -42,28 +42,34 @@ pub const Client = struct {
     free_token: bool,
 
     pub fn init(allocator: Allocator, name: []const u8, access_token: ?[]const u8) !@This() {
-        const long_term_keys = crypto.genKeyPair();
-        var token: []const u8 = undefined;
-        var free_token: bool = false;
-        if (access_token) |t| {
-            token = t;
-        } else {
-            token = try social.authenticateUser(allocator);
-            free_token = true;
-        }
+        return Client.fromFile(allocator, name) catch |err| blk: {
+            if (err != std.posix.OpenError.FileNotFound) {
+                log.debug("fromFile in init gave {}", .{err});
+                return err;
+            }
 
-        var client = Client{
-            .name = name,
-            .access_token = token,
-            .long_term_keys = long_term_keys,
-            .groups = HashMap(crypto.UUID, Group).init(allocator),
-            .dms = HashMap(crypto.UUID, Dm).init(allocator),
-            .allocator = allocator,
-            .free_token = free_token,
+            const long_term_keys = crypto.genKeyPair();
+            var token: []const u8 = undefined;
+            var free_token: bool = false;
+            if (access_token) |t| {
+                token = t;
+            } else {
+                token = try social.authenticateUser(allocator);
+                free_token = true;
+            }
+
+            var tmp = Client{
+                .name = name,
+                .access_token = token,
+                .long_term_keys = long_term_keys,
+                .groups = HashMap(crypto.UUID, Group).init(allocator),
+                .dms = HashMap(crypto.UUID, Dm).init(allocator),
+                .allocator = allocator,
+                .free_token = free_token,
+            };
+            try tmp.postPublicKey();
+            break :blk tmp;
         };
-        try client.postPublicKey();
-
-        return client;
     }
     pub fn postPublicKey(self: *@This()) !void {
         const keys = self.long_term_keys;
@@ -99,21 +105,17 @@ pub const Client = struct {
                 const aes_key = dm.*.key;
 
                 group_invite.base.decrypt(self.allocator, aes_key) catch {
-                    dprint("acceptGroupInvites: couldnt decrypt message\n", .{});
-                    break;
+                    log.debug("acceptGroupInvites: couldnt decrypt message\n", .{});
+                    continue;
                 };
 
                 const sec: *models.GroupInvite.Secret = &group_invite.base.secret.?;
 
                 if (sec.label == .group_invite) {
-                    dprint("acceptGroupInvite: group invite taken\n", .{});
-
                     try deallocPut(Group, self.allocator, &self.groups, sec.id, Group{
                         .key = sec.key,
                         .name = try self.allocator.dupe(u8, sec.name),
                     });
-
-                    break;
                 }
             }
         }
@@ -168,18 +170,18 @@ pub const Client = struct {
                 enc.nonce,
                 &enc.id.key,
             ) catch |err| {
-                dprint("acceptDmInvite: couldnt get key {}\n", .{err});
-                break;
+                log.debug("acceptDmInvite: couldnt get key {}\n", .{err});
+                continue;
             };
 
             dm_invite.base.decrypt(self.allocator, aes_key) catch {
-                dprint("acceptDmInvite: couldnt decrypt message\n", .{});
-                break;
+                log.debug("acceptDmInvite: couldnt decrypt message\n", .{});
+                continue;
             };
 
             if (dm_invite.base.secret.?.label != .dm_invite) {
-                dprint("acceptDmInvite: wrong label\n", .{});
-                break;
+                log.debug("acceptDmInvite: wrong label\n", .{});
+                continue;
             }
 
             try deallocPut(Dm, self.allocator, &self.dms, enc.id, Dm{
@@ -193,7 +195,7 @@ pub const Client = struct {
 
         const ephemeral_keys = crypto.genKeyPair();
 
-        const parsed_user = try social.getUser(self.allocator, username);
+        const parsed_user = social.getUser(self.allocator, username) catch |err| return err;
         defer parsed_user.deinit();
 
         var user = parsed_user.value;
@@ -229,6 +231,7 @@ pub const Client = struct {
         return id;
     }
     pub fn getUserIdFromName(self: *@This(), name: []const u8) !crypto.UUID {
+        try self.acceptDmInvites();
         var it = self.dms.iterator();
         while (it.next()) |dm| {
             if (std.mem.eql(u8, dm.value_ptr.*.name, name)) {
@@ -238,6 +241,7 @@ pub const Client = struct {
         return self.dmInvite(name);
     }
     pub fn getGroupIdFromName(self: *@This(), name: []const u8) !crypto.UUID {
+        try self.acceptGroupInvites();
         var it = self.groups.iterator();
         while (it.next()) |group| {
             if (std.mem.eql(u8, group.value_ptr.*.name, name)) {
@@ -284,7 +288,7 @@ pub const Client = struct {
         defer parsed_messages.deinit();
         const messages: []models.Message = parsed_messages.value;
 
-        dprint("ID: {s}\n", .{id.str});
+        log.info("Messages from Group {s}:", .{self.groups.get(id).?.name});
         for (0..messages.len) |i| {
             const encoded_message = messages[i].getContent();
 
@@ -292,19 +296,17 @@ pub const Client = struct {
             defer group_message.base.deinit(self.allocator);
 
             group_message.base.decrypt(self.allocator, aes_key) catch {
-                dprint("recieveGroupMessage: couldnt decrypt message\n", .{});
-                break;
+                log.debug("recieveGroupMessage: couldnt decrypt message\n", .{});
+                continue;
             };
 
             if (group_message.base.secret.?.label != .group_message) {
-                dprint("recieveGroupMessage: wrong label\n", .{});
-                break;
+                log.debug("recieveGroupMessage: wrong label\n", .{});
+                continue;
             }
 
-            dprint("recieveGroupMessage: Message {} from user: {s} in group: {s}:\n\t{s}\n", .{
-                i,
+            log.info("\t{s}: {s}\n", .{
                 messages[i].account.username,
-                self.groups.get(id).?.name,
                 group_message.base.secret.?.message,
             });
         }
@@ -347,7 +349,7 @@ pub const Client = struct {
         defer parsed_messages.deinit();
         const messages: []models.Message = parsed_messages.value;
 
-        dprint("ID: {s}\n", .{id.str});
+        log.info("Messages from dms with {s}:", .{self.dms.get(id).?.name});
         for (0..messages.len) |i| {
             const encoded_message = messages[i].getContent();
 
@@ -355,17 +357,16 @@ pub const Client = struct {
             defer dm_message.base.deinit(self.allocator);
 
             dm_message.base.decrypt(self.allocator, aes_key) catch {
-                dprint("recieveDmMessage: couldnt decrypt message\n", .{});
-                break;
+                log.debug("recieveDmMessage: couldnt decrypt message\n", .{});
+                continue;
             };
 
             if (dm_message.base.secret.?.label != .dm_message) {
-                dprint("recieveDmMessage: wrong label\n", .{});
-                break;
+                log.debug("recieveDmMessage: wrong label\n", .{});
+                continue;
             }
 
-            dprint("recieveDmMessage: Message {} from {s}:\n\t{s}\n", .{
-                i,
+            log.info("\t{s}: {s}\n", .{
                 messages[i].account.username,
                 dm_message.base.secret.?.message,
             });
@@ -404,14 +405,12 @@ pub const Client = struct {
         defer self.allocator.free(path);
 
         const file = std.fs.cwd().createFile(path, .{}) catch |err| {
-            dprint("saveToFile: file error: {}\n", .{err});
+            log.debug("saveToFile: file error: {}\n", .{err});
             return err;
         };
         defer file.close();
 
         try file.writeAll(string.written());
-
-        dprint("saveToFile: file written with: {s}\n", .{string.written()});
     }
     pub fn fromFile(allocator: Allocator, name: []const u8) !@This() {
         const path = try std.fmt.allocPrint(allocator, "data/{s}.json", .{name});

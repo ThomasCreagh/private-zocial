@@ -1,0 +1,58 @@
+[u[s[6;37HERR: memory address 0x7ffff7ee0000 leaked: 
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/mem/Allocator.zig:436:40[0m: [2m0x109d04e in dupe__anon_5581 (std.zig)[0m
+    const new_buf = try allocator.alloc(T, m.len);
+                                       [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/client.zig:519:43[0m: [2m0x116f698 in arrayToDmMap (main.zig)[0m
+                .name = try allocator.dupe(u8, self.dms[i].dm.name),
+                                          [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/client.zig:442:49[0m: [2m0x11709ce in fromFile (main.zig)[0m
+            .dms = try saved_client.arrayToDmMap(allocator),
+                                                [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/client.zig:46:31[0m: [2m0x117446b in init (main.zig)[0m
+        return Client.fromFile(allocator, name) catch |err| blk: {
+                              [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/main.zig:52:33[0m: [2m0x118487e in main (main.zig)[0m
+    var client = try Client.init(allocator, name, null);
+                                [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/start.zig:627:37[0m: [2m0x1185859 in posixCallMainAndExit (std.zig)[0m
+            const result = root.main() catch |err| {
+                                    [32m^[0m
+[u[s[7;37HERR: memory address 0x7ffff7f00000 leaked: 
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/mem/Allocator.zig:436:40[0m: [2m0x109d04e in dupe__anon_5581 (std.zig)[0m
+    const new_buf = try allocator.alloc(T, m.len);
+                                       [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/client.zig:439:47[0m: [2m0x1170592 in fromFile (main.zig)[0m
+            .access_token = try allocator.dupe(u8, saved_client.access_token),
+                                              [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/client.zig:46:31[0m: [2m0x117446b in init (main.zig)[0m
+        return Client.fromFile(allocator, name) catch |err| blk: {
+                              [32m^[0m
+[1m/home/tom/Documents/code/private-zocail/src/main.zig:52:33[0m: [2m0x118487e in main (main.zig)[0m
+    var client = try Client.init(allocator, name, null);
+                                [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/start.zig:627:37[0m: [2m0x1185859 in posixCallMainAndExit (std.zig)[0m
+            const result = root.main() catch |err| {
+                                    [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/start.zig:232:5[0m: [2m0x116d351 in _start (std.zig)[0m
+    asm volatile (switch (native_arch) {
+    [32m^[0m
+[u[s[8;37HERR: memory address 0x7ffff7f20100 leaked: 
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/multi_array_list.zig:491:51[0m: [2m0x121de1b in setCapacity (std.zig)[0m
+            const new_bytes = try gpa.alignedAlloc(u8, .of(Elem), capacityInBytes(new_capacity));
+                                                  [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/multi_array_list.zig:460:36[0m: [2m0x121ec75 in ensureTotalCapacity (std.zig)[0m
+            return self.setCapacity(gpa, growCapacity(self.capacity, new_capacity));
+                                   [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/array_hash_map.zig:892:49[0m: [2m0x11f5cb9 in ensureTotalCapacityContext (std.zig)[0m
+            try self.entries.ensureTotalCapacity(gpa, new_capacity);
+                                                [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/array_hash_map.zig:787:44[0m: [2m0x11c1d98 in getOrPutContextAdapted__anon_28943 (std.zig)[0m
+            self.ensureTotalCapacityContext(gpa, self.entries.len + 1, ctx) catch |err| {
+                                           [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/array_hash_map.zig:775:56[0m: [2m0x11a4606 in getOrPutContext (std.zig)[0m
+            const gop = try self.getOrPutContextAdapted(gpa, key, ctx, ctx);
+                                                       [32m^[0m
+[1m/nix/store/kfy6nkp1j0h3iyzls3qdqd1ppngzwm4c-zig-0.15.2/lib/zig/std/array_hash_map.zig:993:49[0m: [2m0x1189964 in fetchPutContext (std.zig)[0m
+            const gop = try self.getOrPutContext(gpa, key, ctx);
+                                                [32m^[0m
+[u
