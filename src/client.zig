@@ -116,6 +116,9 @@ pub const Client = struct {
                         .key = sec.key,
                         .name = try self.allocator.dupe(u8, sec.name),
                     });
+                    const init_message = try std.fmt.allocPrint(self.allocator, "{s} has arrived with pizza!", .{self.name});
+                    defer self.allocator.free(init_message);
+                    try self.sendGroupMessage(sec.id, init_message);
                 }
             }
         }

@@ -56,28 +56,4 @@ pub fn main() !void {
     try tui.runInputLoop();
 
     try client.saveToFile();
-
-    //var client_a = try Client.init(allocator, "alice", "y5Rql1ZvWYfqEwdPxout4pz1IUD1JamIaAiS4yTzZTg");
-    //defer client_a.deinit();
-    //var client_b = try Client.init(allocator, "bob", "r4wsr-ygHOtFztmpBpnrbkGX5a1YmnMOK4ggrGI3exQ");
-    //defer client_b.deinit();
-
-    //var client_a = try Client.fromFile(allocator, "alice");
-    //defer client_a.deinit();
-    //var client_b = try Client.fromFile(allocator, "bob");
-    //defer client_b.deinit();
-
-    //_ = try client_b.createGroup("bob_alice");
-    //try client_b.groupInvite(try client_b.getUserIdFromName("alice"), try client_b.getGroupIdFromName("bob_alice"));
-    ////try client_b.sendMessage(try client_b.getUserIdFromName("alice"), "Hey alice! I invited you to a new group.");
-    //try client_a.acceptDmInvites();
-    //try client_a.acceptGroupInvites();
-
-    //try client_b.sendGroupMessage(try client_b.getGroupIdFromName("bob_alice"), "Hey alice!");
-    //try client_a.sendGroupMessage(try client_a.getGroupIdFromName("bob_alice"), "Hey bob!");
-    //try client_a.recieveAllMessages();
-    //try client_b.recieveAllMessages();
-
-    //try client_b.saveToFile();
-    //try client_a.saveToFile();
 }
