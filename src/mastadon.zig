@@ -22,7 +22,7 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     const stdin: *std.io.Reader = &stdin_reader.interface;
 
     const auth_url: []const u8 =
-        "\thttps://social.thomascreagh.com/oauth/authorize" ++
+        "\t" ++ config.URL ++ "/oauth/authorize" ++
         "?client_id={s}" ++
         "&scope=read+write+push" ++
         "&redirect_uri=urn:ietf:wg:oauth:2.0:oob" ++
@@ -39,7 +39,7 @@ pub fn authenticateUser(allocator: Allocator) ![]const u8 {
     var client = Client{ .allocator = allocator };
     defer client.deinit();
 
-    const uri = try std.Uri.parse("https://social.thomascreagh.com/oauth/token");
+    const uri = try std.Uri.parse(config.URL ++ "/oauth/token");
 
     var request = try client.request(.POST, uri, .{
         .headers = .{
@@ -85,7 +85,7 @@ pub fn getUser(
 ) !Parsed(models.User) {
     const url_format = try std.fmt.allocPrint(
         allocator,
-        "https://social.thomascreagh.com/api/v1/accounts/lookup?acct={s}",
+        config.URL ++ "/api/v1/accounts/lookup?acct={s}",
         .{username},
     );
     defer allocator.free(url_format);
@@ -133,11 +133,11 @@ pub fn getMessages(
     if (id) |uuid| {
         auth_url = try std.fmt.allocPrint(
             allocator,
-            "https://social.thomascreagh.com/api/v1/timelines/tag/private_zocial_{s}",
+            config.URL ++ "/api/v1/timelines/tag/private_zocial_{s}",
             .{uuid.str},
         );
     } else {
-        auth_url = try allocator.dupe(u8, "https://social.thomascreagh.com/api/v1/timelines/tag/private_zocial_0");
+        auth_url = try allocator.dupe(u8, config.URL ++ "/api/v1/timelines/tag/private_zocial_0");
     }
     defer allocator.free(auth_url);
 
@@ -196,7 +196,7 @@ pub fn sendMessage(
     var client = Client{ .allocator = allocator };
     defer client.deinit();
 
-    const uri = try std.Uri.parse("https://social.thomascreagh.com/api/v1/statuses");
+    const uri = try std.Uri.parse(config.URL ++ "/api/v1/statuses");
 
     const auth_format = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
     defer allocator.free(auth_format);
@@ -229,7 +229,7 @@ pub fn setBio(
     var client = Client{ .allocator = allocator };
     defer client.deinit();
 
-    const uri = try std.Uri.parse("https://social.thomascreagh.com/api/v1/accounts/update_credentials");
+    const uri = try std.Uri.parse(config.URL ++ "/api/v1/accounts/update_credentials");
 
     const auth_format = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
     defer allocator.free(auth_format);
