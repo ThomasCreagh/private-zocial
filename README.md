@@ -5,6 +5,7 @@ A crypto key management system that wraps mastadon written in zig
 ## How to run:
 First create an application on the target mastadon instance.
 You can find the docs to create an application on https://docs.joinmastodon.org/client/token/#app.
+> Note! Private zocial only works with mastadon instances with longer character limits such as 2000chars. (I just self hosted my own to get around this and set the limit to a million which did the job).
 The main command to get your application id and secret is:
 ```bash
 curl -X POST \
