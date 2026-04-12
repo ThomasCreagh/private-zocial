@@ -13,6 +13,11 @@ const HashMap = std.AutoArrayHashMap;
 const ArrayList = std.ArrayList;
 const BaseMethods = models.BaseMethods;
 
+const ClientError = error{
+    IdNotFound,
+    GroupNameNotFound,
+};
+
 pub const Group = struct {
     name: []const u8,
     key: crypto.AesKey,
@@ -85,7 +90,61 @@ pub const Client = struct {
             .key = aes_key,
             .name = try self.allocator.dupe(u8, group_name),
         });
+        const init_message = try std.fmt.allocPrint(self.allocator, "{s} has arrived with pizza!", .{self.name});
+        defer self.allocator.free(init_message);
+        try self.sendGroupMessage(id, init_message);
         return id;
+    }
+    pub fn removeFromGroup(
+        self: *@This(),
+        removing_user_id: crypto.UUID,
+        group_id: crypto.UUID,
+        new_group_name: []const u8,
+    ) !void {
+        var set = try self.getListOfIdsInGroup(group_id);
+        defer set.deinit();
+
+        _ = set.orderedRemove(removing_user_id);
+        const new_group_id = try self.createGroup(new_group_name);
+        for (set.unmanaged.keys()) |id| {
+            try self.groupInvite(id, new_group_id);
+        }
+    }
+    pub fn getListOfIdsInGroup(self: *@This(), id: crypto.UUID) !HashMap(crypto.UUID, void) {
+        var aes_key: crypto.AesKey = undefined;
+        if (self.groups.get(id)) |x| {
+            aes_key = x.key;
+        } else {
+            return ClientError.IdNotFound;
+        }
+
+        const parsed_messages = try social.getMessages(self.allocator, self.access_token, id);
+        defer parsed_messages.deinit();
+        const messages: []models.Message = parsed_messages.value;
+        var set = HashMap(crypto.UUID, void).init(self.allocator);
+
+        log.info("Messages from Group {s}:", .{self.groups.get(id).?.name});
+        for (0..messages.len) |i| {
+            const encoded_message = messages[i].getContent();
+
+            var group_message = try BaseMethods(models.GroupMessage).fromBase32(self.allocator, encoded_message);
+            defer group_message.base.deinit(self.allocator);
+
+            group_message.base.decrypt(self.allocator, aes_key) catch {
+                log.debug("recieveGroupMessage: couldnt decrypt message\n", .{});
+                continue;
+            };
+
+            if (group_message.base.secret.?.label != .group_message) {
+                log.debug("recieveGroupMessage: wrong label\n", .{});
+                continue;
+            }
+
+            if (std.mem.eql(u8, messages[i].account.username, self.name)) continue;
+
+            try set.put(try self.getUserIdFromName(messages[i].account.username), {});
+        }
+        return set;
     }
     pub fn acceptGroupInvites(self: *@This()) !void {
         var dm_it = self.dms.iterator();
@@ -112,13 +171,16 @@ pub const Client = struct {
                 const sec: *models.GroupInvite.Secret = &group_invite.base.secret.?;
 
                 if (sec.label == .group_invite) {
+                    const previously_part_of_group = self.groups.contains(sec.id);
                     try deallocPut(Group, self.allocator, &self.groups, sec.id, Group{
                         .key = sec.key,
                         .name = try self.allocator.dupe(u8, sec.name),
                     });
-                    const init_message = try std.fmt.allocPrint(self.allocator, "{s} has arrived with pizza!", .{self.name});
-                    defer self.allocator.free(init_message);
-                    try self.sendGroupMessage(sec.id, init_message);
+                    if (previously_part_of_group == false) {
+                        const init_message = try std.fmt.allocPrint(self.allocator, "{s} has arrived with pizza!", .{self.name});
+                        defer self.allocator.free(init_message);
+                        try self.sendGroupMessage(sec.id, init_message);
+                    }
                 }
             }
         }
@@ -129,7 +191,7 @@ pub const Client = struct {
         if (self.dms.get(user_id)) |dm| {
             user_key = dm.key;
         } else {
-            return error.UserIdNotFound;
+            return ClientError.IdNotFound;
         }
         var group_invite: models.GroupInvite = try BaseMethods(models.GroupInvite).fromEncryptedAndSecret(
             self.allocator,
@@ -244,6 +306,7 @@ pub const Client = struct {
         return self.dmInvite(name);
     }
     pub fn getGroupIdFromName(self: *@This(), name: []const u8) !crypto.UUID {
+        // Right now this just selects the first name in the list which is a flaw but could be fixed in the future
         try self.acceptGroupInvites();
         var it = self.groups.iterator();
         while (it.next()) |group| {
@@ -251,14 +314,14 @@ pub const Client = struct {
                 return group.key_ptr.*;
             }
         }
-        return error.GroupNotFound;
+        return ClientError.IdNotFound;
     }
     pub fn sendGroupMessage(self: *@This(), id: crypto.UUID, message: []const u8) !void {
         var aes_key: crypto.AesKey = undefined;
         if (self.groups.get(id)) |x| {
             aes_key = x.key;
         } else {
-            return error.IdNotFound;
+            return ClientError.IdNotFound;
         }
 
         var group_message: models.GroupMessage = try BaseMethods(models.GroupMessage).fromEncryptedAndSecret(
@@ -284,7 +347,7 @@ pub const Client = struct {
         if (self.groups.get(id)) |x| {
             aes_key = x.key;
         } else {
-            return error.IdNotInMap;
+            return ClientError.IdNotFound;
         }
 
         const parsed_messages = try social.getMessages(self.allocator, self.access_token, id);
@@ -319,7 +382,7 @@ pub const Client = struct {
         if (self.dms.get(id)) |x| {
             aes_key = x.key;
         } else {
-            return error.IdNotFound;
+            return ClientError.IdNotFound;
         }
 
         var dm_message: models.DmMessage = try BaseMethods(models.DmMessage).fromEncryptedAndSecret(
@@ -345,7 +408,7 @@ pub const Client = struct {
         if (self.dms.get(id)) |x| {
             aes_key = x.key;
         } else {
-            return error.IdNotInMap;
+            return ClientError.IdNotFound;
         }
 
         const parsed_messages = try social.getMessages(self.allocator, self.access_token, id);

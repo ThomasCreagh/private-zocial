@@ -48,8 +48,10 @@ pub const Tui = struct {
         try w.writeAll("\x1b[5;1H  gm <group> <msg>");
         try w.writeAll("\x1b[6;1H  create <group>");
         try w.writeAll("\x1b[7;1H  inv <user> <group>");
-        try w.writeAll("\x1b[8;1H  clear");
-        try w.writeAll("\x1b[9;1H  quit");
+        try w.writeAll("\x1b[8;1H  rm <user> <group>");
+        try w.writeAll("\x1b[9;1H      <group name>");
+        try w.writeAll("\x1b[10;1H  clear");
+        try w.writeAll("\x1b[11;1H  quit");
         try w.print("\x1b[8;{d}H\x1b[7m **{s}** message outputs \x1b[0m", .{ DIVIDER_COL, self.client.name });
         try w.print("\x1b[{d};1H Enter command: ", .{self.term_end});
         try w.flush();
@@ -166,6 +168,12 @@ pub const Tui = struct {
         var cmd_buf: [256]u8 = undefined;
         var cmd_len: usize = 0;
 
+        var f_buf: [64]u8 = undefined;
+        var f_stdout_impl = std.fs.File.stdout().writer(&f_buf);
+        const f_w = &f_stdout_impl.interface;
+        try f_w.print("\x1b[{d};1H\x1b[2K Enter command: ", .{self.term_end});
+        try f_w.flush();
+
         while (self.quit == false) {
             var byte: [1]u8 = undefined;
             _ = try stdin.read(&byte);
@@ -215,6 +223,7 @@ pub const Tui = struct {
         const gm_str: []const u8 = "gm";
         const msgs_str: []const u8 = "msgs";
         const create_str: []const u8 = "create";
+        const rm_str: []const u8 = "rm";
         const inv_str: []const u8 = "inv";
         if (std.mem.startsWith(u8, cmd, dm_str)) {
             const args = cmd[dm_str.len + 1 ..];
@@ -252,6 +261,23 @@ pub const Tui = struct {
                 return;
             };
             self.appendLog("{s} successful", .{create_str});
+        } else if (std.mem.startsWith(u8, cmd, rm_str)) {
+            const args = cmd[rm_str.len + 1 ..];
+            var it = mem.splitScalar(u8, args, ' ');
+            const user_id = self.client.getUserIdFromName(it.next().?) catch |err| {
+                self.appendLog("{s} failed: {}", .{ rm_str, err });
+                return;
+            };
+            const group_id = self.client.getGroupIdFromName(it.next().?) catch |err| {
+                self.appendLog("{s} failed: {}", .{ rm_str, err });
+                return;
+            };
+            const group_name = it.next().?;
+            _ = self.client.removeFromGroup(user_id, group_id, group_name) catch |err| {
+                self.appendLog("{s} failed: {}", .{ rm_str, err });
+                return;
+            };
+            self.appendLog("{s} successful", .{rm_str});
         } else if (std.mem.startsWith(u8, cmd, inv_str)) {
             const args = cmd[inv_str.len + 1 ..];
             var it = mem.splitScalar(u8, args, ' ');
